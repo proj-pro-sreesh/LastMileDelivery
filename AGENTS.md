@@ -25,6 +25,10 @@ Run backend commands from `backend/`, tests from repo root:
 - `backend/tests/conftest.py` puts `backend/` on `sys.path`, auto-creates DB `lastmile_delivery_test`, and truncates all tables (`CASCADE`) after every test — new tables are covered automatically.
 - Auth: JWT via `HTTPBearer`; protect routes with `Depends(require_role(UserRole.X))` from `app/core/deps.py`. `/auth/register` only ever creates CUSTOMERs — agents/admins come from `scripts/seed.py`.
 - Emails stored lowercased (normalized in `auth_service`); duplicate → 409, bad creds → uniform 401 (no user enumeration).
+- Pricing: `rate_engine.calculate_quote()` is the single source of truth — quote endpoint and order creation must both call it. Intra-zone rates are rate_cards rows with `from_zone_id = to_zone_id`; each pincode maps to exactly one zone (`areas.pincode` UNIQUE); chargeable weight ceils to whole kg; missing rate/COD card → 422, never a fallback.
+- Seed demo data: `../.venv/bin/python scripts/seed.py` (idempotent) — admin `admin@lastmile-demo.com` / `Admin@123`. Don't use `.test`/`.local` emails in API payloads: pydantic EmailStr rejects reserved TLDs.
+- Alembic note: autogenerate spuriously reports `ck_users_role` as removed on users table — ignore/strip that from new migrations.
+- Admin CRUD endpoints live in one router (`app/routers/admin.py`, role-gated at router level via `dependencies=[Depends(require_role(ADMIN))]`).
 
 ## Conventions (from spec — enforce in every phase)
 
