@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.routers import admin, agent, auth, health, orders
+from app.routers import admin, agent, auth, health, notifications, orders
 
 
 def create_app() -> FastAPI:
@@ -25,6 +25,7 @@ def create_app() -> FastAPI:
     app.include_router(orders.router)
     app.include_router(agent.router)
     app.include_router(admin.router)
+    app.include_router(notifications.router)
     return app
 
 

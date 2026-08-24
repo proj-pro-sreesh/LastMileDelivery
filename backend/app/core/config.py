@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     secret_key: str = ""
     access_token_expire_minutes: int = 60 * 24
+    notifications_mode: str = "mock"  # "mock" writes in-app rows and logs email/SMS; "disabled" turns off
 
     @model_validator(mode="after")
     def _ensure_secret_key(self) -> "Settings":
@@ -30,6 +31,10 @@ class Settings(BaseSettings):
                 raise ValueError("SECRET_KEY must be set when ENVIRONMENT=production")
             self.secret_key = secrets.token_hex(32)
         return self
+
+    @property
+    def notifications_enabled(self) -> bool:
+        return self.notifications_mode.lower() != "disabled"
 
     @property
     def cors_origin_list(self) -> list[str]:

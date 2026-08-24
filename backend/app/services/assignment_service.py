@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.models import AgentProfile, Order, User, UserRole
 from app.models.enums import AvailabilityStatus, OrderStatus
-from app.services import tracking_service
+from app.services import notification_service, tracking_service
 from app.services.zone_service import PincodeNotMappedError, get_zone_for_pincode
 from app.utils.geo import haversine_km
 
@@ -191,6 +191,8 @@ def _apply_assignment(db: Session, *, order: Order, profile: AgentProfile, actor
     tracking_service.add_tracking_record(
         db, order_id=order.id, status=OrderStatus.ASSIGNED, actor_id=actor_id, remarks=remarks
     )
+    notification_service.notify_order_status(db, order=order, new_status=OrderStatus.ASSIGNED)
+    notification_service.notify_agent_assigned(db, order=order, agent_user_id=profile.user_id)
     db.commit()
     db.refresh(order)
 

@@ -3,6 +3,7 @@ from app.models.agent_profile import AgentProfile
 from app.models.area import Area
 from app.models.cod_rate import CODRate
 from app.models.enums import AvailabilityStatus, OrderStatus, OrderType, PaymentType, ZoneType
+from app.models.notification import Notification, NotificationChannel
 from app.models.order import Order
 from app.models.order_tracking import OrderTracking
 from app.models.rate_card import RateCard
@@ -18,6 +19,7 @@ __all__ = [
     "Area",
     "RateCard",
     "CODRate",
+    "Notification",
     "Order",
     "OrderTracking",
     "OrderType",

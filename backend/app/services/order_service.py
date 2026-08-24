@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Area, Order, OrderStatus, User, UserRole
 from app.models.enums import OrderType, PaymentType
-from app.services import assignment_service, tracking_service
+from app.services import assignment_service, notification_service, tracking_service
 from app.services.rate_engine import calculate_quote
 
 
@@ -139,6 +139,7 @@ def update_status(db: Session, *, order: Order, new_status, actor_id, remarks: s
     if new_status in assignment_service.TERMINAL_ORDER_STATUSES:
         assignment_service.release_agent_if_idle(db, order)
     tracking_service.add_tracking_record(db, order_id=order.id, status=new_status, actor_id=actor_id, remarks=remarks)
+    notification_service.notify_order_status(db, order=order, new_status=new_status, remarks=remarks)
     db.commit()
     db.refresh(order)
     return order
@@ -174,6 +175,7 @@ def reschedule_order(
         actor_id=actor_id,
         remarks=(remarks or "Rescheduled for redelivery").strip(),
     )
+    notification_service.notify_order_status(db, order=order, new_status=OrderStatus.PENDING, remarks=remarks)
     db.commit()
     db.refresh(order)
     return order
