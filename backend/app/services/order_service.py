@@ -132,10 +132,48 @@ def list_orders_for_agent(db: Session, agent: User, *, status=None) -> list[Orde
 
 def update_status(db: Session, *, order: Order, new_status, actor_id, remarks: str | None = None) -> Order:
     """Apply a status change and append the immutable tracking row in one transaction."""
+    previous_status = order.status
     order.status = new_status
+    if new_status == OrderStatus.FAILED and previous_status != OrderStatus.FAILED:
+        order.delivery_attempt += 1
     if new_status in assignment_service.TERMINAL_ORDER_STATUSES:
         assignment_service.release_agent_if_idle(db, order)
     tracking_service.add_tracking_record(db, order_id=order.id, status=new_status, actor_id=actor_id, remarks=remarks)
+    db.commit()
+    db.refresh(order)
+    return order
+
+
+class OrderNotReschedulableError(Exception):
+    pass
+
+
+def reschedule_order(
+    db: Session,
+    *,
+    order: Order,
+    actor_id,
+    scheduled_delivery_date: date | None = None,
+    remarks: str | None = None,
+) -> Order:
+    """Send a FAILED order back to the assignment queue (FAILED -> PENDING).
+
+    Releases the assigned agent, clears the assignment, bumps the redelivery
+    date (default: tomorrow) and appends the tracking row — one transaction.
+    """
+    if order.status != OrderStatus.FAILED:
+        raise OrderNotReschedulableError(f"Only FAILED orders can be rescheduled; order is {order.status.value}")
+
+    order.status = OrderStatus.PENDING
+    order.assigned_agent_id = None
+    order.scheduled_delivery_date = scheduled_delivery_date or _default_delivery_date()
+    tracking_service.add_tracking_record(
+        db,
+        order_id=order.id,
+        status=OrderStatus.PENDING,
+        actor_id=actor_id,
+        remarks=(remarks or "Rescheduled for redelivery").strip(),
+    )
     db.commit()
     db.refresh(order)
     return order

@@ -33,3 +33,7 @@ def validate_agent_transition(current: OrderStatus, target: OrderStatus) -> None
 def validate_admin_override(current: OrderStatus, target: OrderStatus) -> None:
     if current == target:
         raise InvalidTransitionError(f"Order is already in status {current.value}")
+    if current == OrderStatus.FAILED and target == OrderStatus.PENDING:
+        raise InvalidTransitionError(
+            "FAILED orders must be rescheduled via POST /admin/orders/{id}/reschedule"
+        )

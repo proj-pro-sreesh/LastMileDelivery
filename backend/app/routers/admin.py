@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
@@ -16,7 +17,7 @@ from app.schemas.pricing import (
     RateCardResponse,
     RateCardUpdate,
 )
-from app.schemas.status import AdminStatusOverrideRequest
+from app.schemas.status import AdminStatusOverrideRequest, RescheduleRequest
 from app.schemas.zones import AreaCreate, AreaResponse, AreaUpdate, ZoneCreate, ZoneResponse, ZoneUpdate
 from app.services import assignment_service, order_service, pricing_service, zone_service
 from app.services.assignment_service import (
@@ -48,6 +49,33 @@ def override_order_status(
     return order_service.update_status(
         db, order=order, new_status=payload.status, actor_id=current_user.id, remarks=payload.remarks
     )
+
+
+@router.post("/orders/{order_id}/reschedule", response_model=OrderResponse)
+def reschedule_order(
+    order_id: uuid.UUID,
+    payload: RescheduleRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role(UserRole.ADMIN)),
+):
+    order = order_service.get_order(db, order_id)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    if payload.scheduled_delivery_date is not None and payload.scheduled_delivery_date < date.today():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="scheduled_delivery_date cannot be in the past",
+        )
+    try:
+        return order_service.reschedule_order(
+            db,
+            order=order,
+            actor_id=current_user.id,
+            scheduled_delivery_date=payload.scheduled_delivery_date,
+            remarks=payload.remarks,
+        )
+    except order_service.OrderNotReschedulableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.post("/orders/{order_id}/assign", response_model=OrderResponse)
