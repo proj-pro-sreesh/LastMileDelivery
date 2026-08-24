@@ -1,50 +1,12 @@
 import pytest
 from sqlalchemy import delete
 
-from app.models import Area, CODRate, RateCard, Zone
+from app.models import Area, CODRate, Zone
 from app.services import rate_engine
 from app.services.rate_engine import CODRateNotFoundError, RateCardNotFoundError
 from app.services.zone_service import PincodeNotMappedError
 
 from decimal import Decimal as D
-
-
-@pytest.fixture
-def pricing_world(db_session):
-    """CHE-CEN (600001,600002), CHE-STH (600041), BLR-EST (560001) with seeded-equivalent rates."""
-    che_cen = Zone(name="Chennai Central", code="CHE-CEN")
-    che_sth = Zone(name="Chennai South", code="CHE-STH")
-    blr_est = Zone(name="Bengaluru East", code="BLR-EST")
-    db_session.add_all([che_cen, che_sth, blr_est])
-    db_session.flush()
-
-    for zone, pin in [(che_cen, "600001"), (che_cen, "600002"), (che_sth, "600041"), (blr_est, "560001")]:
-        db_session.add(Area(name=f"Area {pin}", pincode=pin, zone_id=zone.id))
-
-    rates = [
-        ("B2B", True, "30.00", "80.00"),
-        ("B2B", False, "45.00", "120.00"),
-        ("B2C", True, "40.00", "100.00"),
-        ("B2C", False, "60.00", "150.00"),
-    ]
-    for order_type, intra, rate, minimum in rates:
-        for src in [che_cen, che_sth, blr_est]:
-            targets = [src] if intra else [z for z in (che_cen, che_sth, blr_est) if z.id != src.id]
-            for dst in targets:
-                db_session.add(
-                    RateCard(
-                        order_type=order_type,
-                        from_zone_id=src.id,
-                        to_zone_id=dst.id,
-                        rate_per_kg=rate,
-                        minimum_charge=minimum,
-                    )
-                )
-
-    db_session.add(CODRate(order_type="B2B", surcharge="25.00"))
-    db_session.add(CODRate(order_type="B2C", surcharge="30.00"))
-    db_session.commit()
-    return {"che_cen": che_cen, "che_sth": che_sth, "blr_est": blr_est}
 
 
 def quote(db, **overrides):
