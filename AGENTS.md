@@ -22,7 +22,9 @@ Run backend commands from `backend/`, tests from repo root:
 
 - Backend settings load `backend/.env` regardless of CWD (`app/core/config.py`); copy `.env.example`.
 - Alembic URL comes from app settings via `alembic/env.py`, not `alembic.ini`.
-- `backend/tests/conftest.py` puts `backend/` on `sys.path` so pytest works from repo root.
+- `backend/tests/conftest.py` puts `backend/` on `sys.path`, auto-creates DB `lastmile_delivery_test`, and truncates all tables (`CASCADE`) after every test — new tables are covered automatically.
+- Auth: JWT via `HTTPBearer`; protect routes with `Depends(require_role(UserRole.X))` from `app/core/deps.py`. `/auth/register` only ever creates CUSTOMERs — agents/admins come from `scripts/seed.py`.
+- Emails stored lowercased (normalized in `auth_service`); duplicate → 409, bad creds → uniform 401 (no user enumeration).
 
 ## Conventions (from spec — enforce in every phase)
 

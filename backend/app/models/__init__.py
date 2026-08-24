@@ -1,5 +1,6 @@
 from app.core.database import Base
+from app.models.user import User, UserRole
 
-__all__ = ["Base"]
+__all__ = ["Base", "User", "UserRole"]
 
-# Model modules are imported here so Alembic autogenerate sees every table.
+# Import model modules so Alembic autogenerate sees every table.
