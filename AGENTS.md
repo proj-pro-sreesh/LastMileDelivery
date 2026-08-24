@@ -29,6 +29,9 @@ Run backend commands from `backend/`, tests from repo root:
 - Seed demo data: `../.venv/bin/python scripts/seed.py` (idempotent) — admin `admin@lastmile-demo.com` / `Admin@123`. Don't use `.test`/`.local` emails in API payloads: pydantic EmailStr rejects reserved TLDs.
 - Alembic note: autogenerate spuriously reports `ck_users_role` as removed on users table — ignore/strip that from new migrations.
 - Admin CRUD endpoints live in one router (`app/routers/admin.py`, role-gated at router level via `dependencies=[Depends(require_role(ADMIN))]`).
+- Status changes go through `app/services/state_machine.py` (`ALLOWED_TRANSITIONS` + `AGENT_ALLOWED_EDGES`) and `order_service.update_status()` — never set `order.status` directly. Agents only get forward edges from `ASSIGNED`; admin override allows anything except no-ops (remarks required).
+- `order_tracking` immutability is enforced by DB trigger `trg_order_tracking_immutable` (migration ee4a9f5b4650): UPDATE/DELETE raise. TRUNCATE still works, so tests are unaffected. FAILED→PENDING is reserved for the Phase 7 reschedule flow.
+- Tests build schema via Alembic migrations (not `create_all`) and recreate `lastmile_delivery_test` per session — keep triggers/constraints in migrations, not just model metadata.
 
 ## Conventions (from spec — enforce in every phase)
 

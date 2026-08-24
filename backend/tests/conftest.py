@@ -22,25 +22,42 @@ settings = get_settings()
 
 
 def _ensure_test_database() -> None:
-    """Create the test database if it does not exist yet."""
+    """Recreate the test database from scratch so migrations build a pristine schema."""
     conninfo = "postgresql://" + settings.test_database_url.split("://", 1)[1]
     admin_conninfo = re.sub(r"/[^/?]*(\?.*)?$", "/postgres", conninfo)
     target = conninfo.split("?", 1)[0].rsplit("/", 1)[-1]
-    try:
-        with psycopg.connect(admin_conninfo) as conn:
-            conn.autocommit = True
-            conn.execute(f'CREATE DATABASE "{target}"')
-    except psycopg.errors.DuplicateDatabase:
-        pass
+    with psycopg.connect(admin_conninfo) as conn:
+        conn.autocommit = True
+        # Kill any lingering connections before dropping.
+        conn.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s AND pid <> pg_backend_pid()",
+            (target,),
+        )
+        try:
+            conn.execute(f'DROP DATABASE "{target}"')
+        except psycopg.errors.InvalidCatalogName:
+            pass
+        conn.execute(f'CREATE DATABASE "{target}"')
 
 
 @pytest.fixture(scope="session")
 def test_engine():
     _ensure_test_database()
+    _run_migrations()
     engine = create_engine(settings.test_database_url)
-    Base.metadata.create_all(engine)
     yield engine
     engine.dispose()
+
+
+def _run_migrations() -> None:
+    """Build the test schema via Alembic so triggers/constraints match production."""
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", settings.test_database_url)
+    command.upgrade(cfg, "head")
 
 
 @pytest.fixture(autouse=True)

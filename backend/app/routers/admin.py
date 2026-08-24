@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import require_role
 from app.models.user import UserRole
+from app.schemas.orders import OrderResponse
 from app.schemas.pricing import (
     CODRateCreate,
     CODRateResponse,
@@ -14,11 +15,33 @@ from app.schemas.pricing import (
     RateCardResponse,
     RateCardUpdate,
 )
+from app.schemas.status import AdminStatusOverrideRequest
 from app.schemas.zones import AreaCreate, AreaResponse, AreaUpdate, ZoneCreate, ZoneResponse, ZoneUpdate
-from app.services import pricing_service, zone_service
+from app.services import order_service, pricing_service, zone_service
+from app.services.state_machine import InvalidTransitionError, validate_admin_override
 from app.services.zone_service import DuplicateError, NotFoundError
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_role(UserRole.ADMIN))])
+
+
+@router.patch("/orders/{order_id}/status", response_model=OrderResponse)
+def override_order_status(
+    order_id: uuid.UUID,
+    payload: AdminStatusOverrideRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role(UserRole.ADMIN)),
+):
+    order = order_service.get_order(db, order_id)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    try:
+        validate_admin_override(order.status, payload.status)
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    return order_service.update_status(
+        db, order=order, new_status=payload.status, actor_id=current_user.id, remarks=payload.remarks
+    )
 
 
 @router.post("/zones", response_model=ZoneResponse, status_code=status.HTTP_201_CREATED)

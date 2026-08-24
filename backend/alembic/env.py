@@ -16,8 +16,12 @@ from app.models import Base  # noqa: E402
 # access to the values within the .ini file in use.
 config = context.config
 
-# Connection URL comes from application settings (.env), not alembic.ini.
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# Connection URL comes from application settings (.env) unless explicitly provided
+# by a programmatic Alembic caller (e.g., the test suite).
+config.set_main_option(
+    "sqlalchemy.url",
+    config.get_main_option("sqlalchemy.url") or get_settings().database_url,
+)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

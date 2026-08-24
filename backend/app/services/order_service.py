@@ -103,3 +103,26 @@ def can_view(user: User, order: Order) -> bool:
     if user.role == UserRole.AGENT:
         return order.assigned_agent_id == user.id
     return False
+
+
+def get_order_for_agent(db: Session, agent: User, order_id) -> Order | None:
+    order = db.get(Order, order_id)
+    if order is None or order.assigned_agent_id != agent.id:
+        return None
+    return order
+
+
+def list_orders_for_agent(db: Session, agent: User, *, status=None) -> list[Order]:
+    query = select(Order).where(Order.assigned_agent_id == agent.id).order_by(Order.created_at.desc())
+    if status is not None:
+        query = query.where(Order.status == status)
+    return list(db.scalars(query))
+
+
+def update_status(db: Session, *, order: Order, new_status, actor_id, remarks: str | None = None) -> Order:
+    """Apply a status change and append the immutable tracking row in one transaction."""
+    order.status = new_status
+    tracking_service.add_tracking_record(db, order_id=order.id, status=new_status, actor_id=actor_id, remarks=remarks)
+    db.commit()
+    db.refresh(order)
+    return order
