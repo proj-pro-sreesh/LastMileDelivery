@@ -1,0 +1,43 @@
+name: lastmile-delivery
+
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: lastmile
+      POSTGRES_PASSWORD: lastmile
+      POSTGRES_DB: lastmile_delivery
+    volumes:
+      # postgres:18 images expect the mount at /var/lib/postgresql (not .../data)
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lastmile -d lastmile_delivery"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: ./backend
+    environment:
+      # Keep development here so SECRET_KEY may be auto-generated for local demos.
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql+psycopg://lastmile:lastmile@db:5432/lastmile_delivery
+      NOTIFICATIONS_MODE: mock
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
