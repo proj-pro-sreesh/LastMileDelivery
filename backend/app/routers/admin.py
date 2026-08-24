@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import require_role
 from app.models.user import UserRole
+from app.schemas.agent import AgentAdminResponse, AssignmentResultResponse, ManualAssignRequest
 from app.schemas.orders import OrderResponse
 from app.schemas.pricing import (
     CODRateCreate,
@@ -17,7 +18,12 @@ from app.schemas.pricing import (
 )
 from app.schemas.status import AdminStatusOverrideRequest
 from app.schemas.zones import AreaCreate, AreaResponse, AreaUpdate, ZoneCreate, ZoneResponse, ZoneUpdate
-from app.services import order_service, pricing_service, zone_service
+from app.services import assignment_service, order_service, pricing_service, zone_service
+from app.services.assignment_service import (
+    AgentNotFoundError,
+    AgentNotEligibleError,
+    OrderNotAssignableError,
+)
 from app.services.state_machine import InvalidTransitionError, validate_admin_override
 from app.services.zone_service import DuplicateError, NotFoundError
 
@@ -42,6 +48,56 @@ def override_order_status(
     return order_service.update_status(
         db, order=order, new_status=payload.status, actor_id=current_user.id, remarks=payload.remarks
     )
+
+
+@router.post("/orders/{order_id}/assign", response_model=OrderResponse)
+def assign_order_manually(
+    order_id: uuid.UUID,
+    payload: ManualAssignRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role(UserRole.ADMIN)),
+):
+    order = order_service.get_order(db, order_id)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    try:
+        return assignment_service.manual_assign(
+            db, order=order, agent_user_id=payload.agent_id, actor_id=current_user.id
+        )
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except AgentNotEligibleError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except OrderNotAssignableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/orders/{order_id}/auto-assign", response_model=AssignmentResultResponse)
+def auto_assign_order(
+    order_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role(UserRole.ADMIN)),
+):
+    order = order_service.get_order(db, order_id)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    try:
+        assigned, message = assignment_service.auto_assign(db, order=order, actor_id=current_user.id)
+    except OrderNotAssignableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    db.refresh(order)
+    return AssignmentResultResponse(
+        assigned=assigned,
+        message=message,
+        order_id=order.id,
+        order_status=order.status.value,
+        assigned_agent_id=order.assigned_agent_id,
+    )
+
+
+@router.get("/agents", response_model=list[AgentAdminResponse])
+def list_agents(db: Session = Depends(get_db)):
+    return assignment_service.list_agents_with_load(db)
 
 
 @router.post("/zones", response_model=ZoneResponse, status_code=status.HTTP_201_CREATED)

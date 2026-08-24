@@ -32,6 +32,7 @@ Run backend commands from `backend/`, tests from repo root:
 - Status changes go through `app/services/state_machine.py` (`ALLOWED_TRANSITIONS` + `AGENT_ALLOWED_EDGES`) and `order_service.update_status()` — never set `order.status` directly. Agents only get forward edges from `ASSIGNED`; admin override allows anything except no-ops (remarks required).
 - `order_tracking` immutability is enforced by DB trigger `trg_order_tracking_immutable` (migration ee4a9f5b4650): UPDATE/DELETE raise. TRUNCATE still works, so tests are unaffected. FAILED→PENDING is reserved for the Phase 7 reschedule flow.
 - Tests build schema via Alembic migrations (not `create_all`) and recreate `lastmile_delivery_test` per session — keep triggers/constraints in migrations, not just model metadata.
+- Assignment lives in `app/services/assignment_service.py`: only AVAILABLE agents are eligible; auto-assign sorts by (pickup-zone match desc, Haversine distance to pickup coords asc, user_id) — deterministic; assignment flips agent to BUSY; reaching any terminal status releases the agent via `release_agent_if_idle` called inside `order_service.update_status`. Distance needs coordinates: areas carry lat/lng centroids (`seed.py`, `pricing_world`), stamped onto orders at creation by `_area_for_pincode`. Agents can't go OFFLINE with active orders.
 
 ## Conventions (from spec — enforce in every phase)
 

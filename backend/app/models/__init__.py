@@ -1,4 +1,5 @@
 from app.core.database import Base
+from app.models.agent_profile import AgentProfile
 from app.models.area import Area
 from app.models.cod_rate import CODRate
 from app.models.enums import AvailabilityStatus, OrderStatus, OrderType, PaymentType, ZoneType
@@ -13,6 +14,7 @@ __all__ = [
     "User",
     "UserRole",
     "Zone",
+    "AgentProfile",
     "Area",
     "RateCard",
     "CODRate",

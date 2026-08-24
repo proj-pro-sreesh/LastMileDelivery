@@ -14,13 +14,14 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.core.security import hash_password
-from app.models import Area, CODRate, RateCard, User, UserRole, Zone
-from app.models.enums import OrderType
+from app.models import AgentProfile, Area, CODRate, RateCard, User, UserRole, Zone
+from app.models.enums import AvailabilityStatus, OrderType
 
 ZONES = [
-    ("Chennai Central", "CHE-CEN", ["600001", "600002"]),
-    ("Chennai South", "CHE-STH", ["600041", "600042"]),
-    ("Bengaluru East", "BLR-EST", ["560001", "560038"]),
+    # name, code, [(pincode, latitude, longitude), ...]
+    ("Chennai Central", "CHE-CEN", [("600001", "13.082700", "80.270700"), ("600002", "13.087800", "80.278400")]),
+    ("Chennai South", "CHE-STH", [("600041", "12.983000", "80.218000"), ("600042", "12.951600", "80.146200")]),
+    ("Bengaluru East", "BLR-EST", [("560001", "12.971900", "77.593700"), ("560038", "12.978400", "77.640800")]),
 ]
 
 # rate_per_kg, minimum_charge keyed by (order_type, intra?)
@@ -39,19 +40,28 @@ USERS = [
     ("Priya Agent", "agent.priya@lastmile-demo.com", "9999000003", "Agent@123", UserRole.AGENT),
 ]
 
+# email -> (latitude, longitude, zone_code, vehicle)
+AGENT_PROFILES = {
+    "agent.vijay@lastmile-demo.com": ("13.082700", "80.270700", "CHE-CEN", "bike"),
+    "agent.priya@lastmile-demo.com": ("12.978400", "77.640800", "BLR-EST", "van"),
+}
+
 
 def seed(session: Session) -> None:
     zones_by_code: dict[str, Zone] = {}
-    for name, code, pincodes in ZONES:
+    for name, code, area_rows in ZONES:
         zone = session.scalar(select(Zone).where(Zone.code == code))
         if zone is None:
             zone = Zone(name=name, code=code)
             session.add(zone)
             session.flush()
         zones_by_code[code] = zone
-        for pin in pincodes:
-            if session.scalar(select(Area).where(Area.pincode == pin)) is None:
-                session.add(Area(name=f"{name} Area {pin}", pincode=pin, zone_id=zone.id))
+        for pin, lat, lng in area_rows:
+            area = session.scalar(select(Area).where(Area.pincode == pin))
+            if area is None:
+                session.add(Area(name=f"{name} Area {pin}", pincode=pin, zone_id=zone.id, latitude=lat, longitude=lng))
+            elif area.latitude is None:
+                area.latitude, area.longitude = lat, lng
 
     for (order_type_str, is_intra), (rate, minimum) in RATE_MATRIX.items():
         for from_zone in zones_by_code.values():
@@ -82,6 +92,22 @@ def seed(session: Session) -> None:
     for name, email, phone, password, role in USERS:
         if session.scalar(select(User).where(User.email == email)) is None:
             session.add(User(name=name, email=email, phone=phone, password_hash=hash_password(password), role=role))
+
+    session.flush()
+
+    for email, (lat, lng, zone_code, vehicle) in AGENT_PROFILES.items():
+        user = session.scalar(select(User).where(User.email == email))
+        if user is not None and session.scalar(select(AgentProfile).where(AgentProfile.user_id == user.id)) is None:
+            session.add(
+                AgentProfile(
+                    user_id=user.id,
+                    availability_status=AvailabilityStatus.AVAILABLE,
+                    latitude=lat,
+                    longitude=lng,
+                    current_zone_id=zones_by_code[zone_code].id,
+                    vehicle_type=vehicle,
+                )
+            )
 
     session.commit()
 

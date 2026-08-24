@@ -127,8 +127,13 @@ def pricing_world(db_session):
     db_session.add_all([che_cen, che_sth, blr_est])
     db_session.flush()
 
-    for zone, pin in [(che_cen, "600001"), (che_cen, "600002"), (che_sth, "600041"), (blr_est, "560001")]:
-        db_session.add(Area(name=f"Area {pin}", pincode=pin, zone_id=zone.id))
+    for zone, pin, lat, lng in [
+        (che_cen, "600001", "13.082700", "80.270700"),
+        (che_cen, "600002", "13.087800", "80.278400"),
+        (che_sth, "600041", "12.983000", "80.218000"),
+        (blr_est, "560001", "12.971900", "77.593700"),
+    ]:
+        db_session.add(Area(name=f"Area {pin}", pincode=pin, zone_id=zone.id, latitude=lat, longitude=lng))
 
     rates = [
         ("B2B", True, "30.00", "80.00"),

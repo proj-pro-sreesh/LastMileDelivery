@@ -3,9 +3,9 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Order, OrderStatus, User, UserRole
+from app.models import Area, Order, OrderStatus, User, UserRole
 from app.models.enums import OrderType, PaymentType
-from app.services import tracking_service
+from app.services import assignment_service, tracking_service
 from app.services.rate_engine import calculate_quote
 
 
@@ -15,6 +15,10 @@ class CustomerNotFoundError(Exception):
 
 def _default_delivery_date() -> date:
     return date.today() + timedelta(days=1)
+
+
+def _area_for_pincode(db: Session, pincode: str) -> Area | None:
+    return db.scalar(select(Area).where(Area.pincode == pincode.strip()))
 
 
 def create_order(
@@ -46,14 +50,21 @@ def create_order(
         payment_type=payment_type,
     )
 
+    pickup_area = _area_for_pincode(db, pickup_pincode)
+    drop_area = _area_for_pincode(db, drop_pincode)
+
     order = Order(
         customer_id=customer_id,
         pickup_address=pickup_address.strip(),
         pickup_pincode=pickup_pincode.strip(),
         pickup_zone_id=breakdown["pickup_zone"].id,
+        pickup_latitude=pickup_area.latitude if pickup_area else None,
+        pickup_longitude=pickup_area.longitude if pickup_area else None,
         drop_address=drop_address.strip(),
         drop_pincode=drop_pincode.strip(),
         drop_zone_id=breakdown["drop_zone"].id,
+        drop_latitude=drop_area.latitude if drop_area else None,
+        drop_longitude=drop_area.longitude if drop_area else None,
         length_cm=length_cm,
         breadth_cm=breadth_cm,
         height_cm=height_cm,
@@ -122,6 +133,8 @@ def list_orders_for_agent(db: Session, agent: User, *, status=None) -> list[Orde
 def update_status(db: Session, *, order: Order, new_status, actor_id, remarks: str | None = None) -> Order:
     """Apply a status change and append the immutable tracking row in one transaction."""
     order.status = new_status
+    if new_status in assignment_service.TERMINAL_ORDER_STATUSES:
+        assignment_service.release_agent_if_idle(db, order)
     tracking_service.add_tracking_record(db, order_id=order.id, status=new_status, actor_id=actor_id, remarks=remarks)
     db.commit()
     db.refresh(order)

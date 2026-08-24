@@ -1,4 +1,5 @@
 from decimal import Decimal as D
+from uuid import uuid4
 
 from sqlalchemy import text
 
@@ -33,7 +34,7 @@ def create_order(client, headers, **overrides):
 def make_user(db_session, role, email=None):
     user = User(
         name="User",
-        email=email or f"{role.value.lower()}.{id(db_session) & 0xffff}@example.com",
+        email=email or f"{role.value.lower()}.{uuid4().hex[:10]}@example.com",
         password_hash=hash_password("password123"),
         role=role,
     )
