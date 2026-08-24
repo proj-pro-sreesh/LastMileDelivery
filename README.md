@@ -17,6 +17,13 @@ Delivery management platform for last-mile logistics: customers book parcels, ad
 | Admin operations | Order list filters server-side by status, zone (matches pickup *or* drop) and assigned agent; agent roster with availability and load |
 | Notifications | In-app feed + swappable email/SMS providers — mock logger by default, **Resend** and **Twilio** supported via config only; provider failures never roll back order transactions (`NOTIFICATIONS_MODE=disabled` switches off) |
 
+## Live Demo
+
+- Frontend: https://last-mile-delivery-rho-eight.vercel.app/
+- Backend API: https://lastmiledelivery-82hg.onrender.com/
+- Swagger API Docs: https://lastmiledelivery-82hg.onrender.com/docs
+- Health Check: https://lastmiledelivery-82hg.onrender.com/health
+
 ## Quick start
 
 ### Option A — Docker (everything in containers)
