@@ -2,6 +2,12 @@ export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000
 
 export type Role = "CUSTOMER" | "AGENT" | "ADMIN";
 
+export interface ZoneInfo {
+  id: string;
+  name: string;
+  code: string;
+}
+
 export interface User {
   id: string;
   name: string;

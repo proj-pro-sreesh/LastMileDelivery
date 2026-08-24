@@ -71,6 +71,7 @@ def reschedule_order(
             db,
             order=order,
             actor_id=current_user.id,
+            actor_role=UserRole.ADMIN.value,
             scheduled_delivery_date=payload.scheduled_delivery_date,
             remarks=payload.remarks,
         )

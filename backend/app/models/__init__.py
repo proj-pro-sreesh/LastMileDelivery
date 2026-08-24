@@ -6,6 +6,7 @@ from app.models.enums import AvailabilityStatus, OrderStatus, OrderType, Payment
 from app.models.notification import Notification, NotificationChannel
 from app.models.order import Order
 from app.models.order_tracking import OrderTracking
+from app.models.reschedule import Reschedule
 from app.models.rate_card import RateCard
 from app.models.user import User, UserRole
 from app.models.zone import Zone
@@ -22,6 +23,7 @@ __all__ = [
     "Notification",
     "Order",
     "OrderTracking",
+    "Reschedule",
     "OrderType",
     "PaymentType",
     "ZoneType",

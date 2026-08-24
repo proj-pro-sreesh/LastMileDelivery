@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Timeline } from "@/components/Timeline";
 import { useAuth } from "@/components/AuthProvider";
-import { ApiError, get } from "@/lib/api";
+import { ApiError, get, post } from "@/lib/api";
 import { dateTime, money } from "@/lib/format";
 import type { Order, TrackingEvent } from "@/lib/types";
 
@@ -17,6 +17,10 @@ export default function OrderDetailPage() {
   const [order, setOrder] = useState<Order | null>(null);
   const [events, setEvents] = useState<TrackingEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleBusy, setRescheduleBusy] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState<string | null>(null);
+  const [rescheduleDone, setRescheduleDone] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -46,6 +50,28 @@ export default function OrderDetailPage() {
       </div>
     );
   if (!order) return <p className="text-sm text-slate-400">Loading order…</p>;
+
+  const failedEvent = [...events].reverse().find((e) => e.status === "FAILED");
+  const canReschedule = order.status === "FAILED" && user?.role === "CUSTOMER";
+
+  async function submitReschedule() {
+    if (!rescheduleDate || rescheduleBusy) return;
+    setRescheduleBusy(true);
+    setRescheduleError(null);
+    try {
+      await post<Order>(`/orders/${id}/reschedule`, {
+        scheduled_delivery_date: rescheduleDate,
+        remarks: "Rescheduled by customer",
+      });
+      setRescheduleDone(true);
+      setRescheduleDate("");
+      await refresh();
+    } catch (err) {
+      setRescheduleError(err instanceof ApiError ? err.message : "Could not reschedule the delivery");
+    } finally {
+      setRescheduleBusy(false);
+    }
+  }
 
   const rows: Array<[string, React.ReactNode]> = [
     ["Pickup", `${order.pickup_address} (${order.pickup_pincode})`],
@@ -87,6 +113,36 @@ export default function OrderDetailPage() {
             Booked {dateTime(order.created_at)}
             {order.agent_name ? ` · Agent: ${order.agent_name}` : ""}
           </p>
+
+          {canReschedule && (
+            <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm font-semibold text-amber-900">Delivery attempt failed</p>
+              {failedEvent?.remarks && <p className="mt-1 text-xs text-amber-800">Reason: {failedEvent.remarks}</p>}
+              {rescheduleDone ? (
+                <p className="mt-3 text-xs font-medium text-emerald-700">
+                  Redelivery scheduled — the order is back in the assignment queue.
+                </p>
+              ) : (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <input
+                    type="date"
+                    value={rescheduleDate}
+                    min={new Date().toISOString().slice(0, 10)}
+                    onChange={(e) => setRescheduleDate(e.target.value)}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-800 focus:border-indigo-500 focus:outline-none"
+                  />
+                  <button
+                    onClick={submitReschedule}
+                    disabled={!rescheduleDate || rescheduleBusy}
+                    className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {rescheduleBusy ? "Rescheduling…" : "Reschedule delivery"}
+                  </button>
+                </div>
+              )}
+              {rescheduleError && <p className="mt-2 text-xs font-medium text-red-600">{rescheduleError}</p>}
+            </div>
+          )}
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

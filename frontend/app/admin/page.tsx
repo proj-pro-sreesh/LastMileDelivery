@@ -8,7 +8,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/components/AuthProvider";
 import { ApiError, get, patch, post } from "@/lib/api";
 import { dateTime, money } from "@/lib/format";
-import type { AgentInfo, Order, OrderStatus } from "@/lib/types";
+import type { AgentInfo, Order, OrderStatus, ZoneInfo } from "@/lib/types";
 
 const ALL_STATUSES: OrderStatus[] = [
   "PENDING",
@@ -26,7 +26,10 @@ export default function AdminOrdersPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [zones, setZones] = useState<ZoneInfo[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [zoneFilter, setZoneFilter] = useState<string>("");
+  const [agentFilter, setAgentFilter] = useState<string>("");
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   useEffect(() => {
@@ -36,14 +39,23 @@ export default function AdminOrdersPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const query = statusFilter ? `?status=${statusFilter}` : "";
-      const [list, agentList] = await Promise.all([get<Order[]>(`/orders${query}`), get<AgentInfo[]>("/admin/agents")]);
+      const params = new URLSearchParams();
+      if (statusFilter) params.set("status", statusFilter);
+      if (zoneFilter) params.set("zone_id", zoneFilter);
+      if (agentFilter) params.set("agent_id", agentFilter);
+      const query = params.size > 0 ? `?${params.toString()}` : "";
+      const [list, agentList, zoneList] = await Promise.all([
+        get<Order[]>(`/orders${query}`),
+        get<AgentInfo[]>("/admin/agents"),
+        get<ZoneInfo[]>("/admin/zones"),
+      ]);
       setOrders(list);
       setAgents(agentList);
+      setZones(zoneList);
     } catch (err) {
       setMessage({ kind: "err", text: err instanceof ApiError ? err.message : "Load failed" });
     }
-  }, [statusFilter]);
+  }, [statusFilter, zoneFilter, agentFilter]);
 
   useEffect(() => {
     if (user?.role === "ADMIN") refresh();
@@ -80,18 +92,56 @@ export default function AdminOrdersPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">All orders</h1>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-        >
-          <option value="">All statuses</option>
-          {ALL_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+          >
+            <option value="">All statuses</option>
+            {ALL_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <select
+            value={zoneFilter}
+            onChange={(e) => setZoneFilter(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+          >
+            <option value="">All zones</option>
+            {zones.map((z) => (
+              <option key={z.id} value={z.id}>
+                {z.name} ({z.code})
+              </option>
+            ))}
+          </select>
+          <select
+            value={agentFilter}
+            onChange={(e) => setAgentFilter(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+          >
+            <option value="">All agents</option>
+            {agents.map((a) => (
+              <option key={a.user_id} value={a.user_id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+          {(statusFilter || zoneFilter || agentFilter) && (
+            <button
+              onClick={() => {
+                setStatusFilter("");
+                setZoneFilter("");
+                setAgentFilter("");
+              }}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            >
+              Reset
+            </button>
+          )}
+        </div>
       </div>
 
       {message && (

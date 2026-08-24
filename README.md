@@ -13,8 +13,9 @@ Delivery management platform for last-mile logistics: customers book parcels, ad
 | Orders | Live quote preview → booking → ownership-scoped detail with append-only tracking timeline (DB trigger makes history immutable) |
 | Assignment | Admin manual assign or one-click auto-assign: AVAILABLE agents only, ranked by pickup-zone match → Haversine distance to pickup coordinates → user id (fully deterministic); assignment flips agent BUSY; any terminal status releases them |
 | Lifecycle | Strict state machine; agents get forward edges only; admin can override anywhere (remarks required) except FAILED→PENDING which is reserved for the reschedule endpoint |
-| Failures & retries | FAILED consumes a delivery attempt and frees the agent; reschedule returns the order to the queue with a fresh redelivery date (default tomorrow, past dates rejected) |
-| Notifications | In-app feed + simulated email/SMS (mock mode default, `NOTIFICATIONS_MODE=disabled` to switch off): assignment (customer + agent), every status change, failure reasons, redelivery notices |
+| Failures & retries | FAILED consumes a delivery attempt and frees the agent; **customers can reschedule their own failed orders** from the order page (past dates rejected, fresh attempt counted, auto-reassigned); admins use the same audited flow (`reschedules` table records who/when/from→to) |
+| Admin operations | Order list filters server-side by status, zone (matches pickup *or* drop) and assigned agent; agent roster with availability and load |
+| Notifications | In-app feed + swappable email/SMS providers — mock logger by default, **Resend** and **Twilio** supported via config only; provider failures never roll back order transactions (`NOTIFICATIONS_MODE=disabled` switches off) |
 
 ## Quick start
 
@@ -67,7 +68,8 @@ Base URL `/`, JSON everywhere, JWT via `Authorization: Bearer <token>`.
 | `POST /auth/register` · `POST /auth/login` · `GET /auth/me` | public/authed | account lifecycle (register always creates CUSTOMERs) |
 | `GET /health` | public | service + database probe |
 | `POST /orders/quote` · `POST /orders` | customer/admin | price preview and booking (admin may book on behalf of a customer) |
-| `GET /orders` · `GET /orders/{id}` · `GET /orders/{id}/tracking` | scoped by role | list/detail/timeline with server-side ownership checks |
+| `GET /orders` · `GET /orders/{id}` · `GET /orders/{id}/tracking` | scoped by role | list/detail/timeline with server-side ownership checks; admins may filter by `?status=` `?zone_id=` (pickup or drop) `?agent_id=` |
+| `POST /orders/{id}/reschedule` | customer (owner) | reschedule a FAILED order: new date, fresh attempt, auto-reassignment |
 | `PATCH /agent/orders/{id}/status` | agent | advance own orders one legal step; FAILED requires a reason |
 | `GET /agent/orders` · `PATCH /agent/availability` · `PATCH /agent/location` | agent | workspace endpoints |
 | `POST /admin/orders/{id}/assign` · `.../auto-assign` | admin | manual and nearest-agent assignment |
@@ -87,10 +89,45 @@ Full request/response schemas are documented interactively at `/docs`.
 - **Deterministic auto-assign:** `(pickup-zone match desc, Haversine distance asc, user_id asc)` — same inputs always pick the same agent.
 - **Tests build the schema via Alembic migrations**, so triggers and constraints are exercised exactly as in production.
 
+## Rate calculation logic
+
+`rate_engine.calculate_quote()` is the only place money is computed — the quote preview and order
+creation both call it, so a booking can never differ from its quote.
+
+```
+volumetric_weight_kg   = length_cm × breadth_cm × height_cm / 5000
+chargeable_weight_kg   = ceil(max(actual_weight_kg, volumetric_weight_kg))     # whole kg
+zone_type              = intra (from_zone == to_zone) | inter
+base_charge            = max(rate_per_kg × chargeable_weight_kg, minimum_charge)
+cod_surcharge          = cod_rates[order_type]                                 # PREPAID → 0
+total_charge           = base_charge + cod_surcharge
+```
+
+- The rate card lookup key is `(order_type B2B|B2C, from_zone_id, to_zone_id)`; **intra-zone
+  pricing is a rate-card row whose `from_zone_id = to_zone_id`** — no special casing.
+- Each pincode maps to exactly one zone (`areas.pincode UNIQUE`). Unmapped pincode, missing rate
+  card or missing COD row all return **HTTP 422** — the engine never falls back.
+- All rates live in `rate_cards` / `cod_rates`; there are no hardcoded prices anywhere in code.
+
+## Database schema
+
+| Table | Purpose | Key relationships |
+| --- | --- | --- |
+| `users` | accounts (bcrypt hashes); role CHECK: `CUSTOMER`/`AGENT`/`ADMIN` | referenced by orders, tracking, notifications |
+| `agent_profiles` | per-agent ops state | `user_id` → users (1:1), `current_zone_id` → zones |
+| `zones` | pricing geography top level | parent of areas, rate cards |
+| `areas` | pincode→zone mapping + lat/lng centroid | `pincode UNIQUE`, `zone_id` → zones |
+| `rate_cards` | `rate_per_kg` + `minimum_charge` per `(order_type, from_zone, to_zone)`; intra-zone = `from = to` | zones ×2 |
+| `cod_rates` | COD surcharge per order type | standalone |
+| `orders` | shipment + immutable money snapshot + coordinates | `customer_id`, `assigned_agent_id` → users; `pickup_zone_id`, `drop_zone_id` → zones |
+| `order_tracking` | append-only status history | `order_id`, `actor_id`; UPDATE/DELETE raise via DB trigger |
+| `reschedules` | audit of every FAILED→PENDING decision (who, role, old/new date, remarks) | `order_id` → orders (CASCADE), `requested_by` → users |
+| `notifications` | in-app feed rows | `user_id` (recipient), optional `order_id` |
+
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest backend/tests -q     # from repo root; 83 tests
+.venv/bin/python -m pytest backend/tests -q     # from repo root; 107 tests
 ```
 
 The suite recreates an isolated `lastmile_delivery_test` database per session via migrations.
@@ -102,10 +139,11 @@ backend/
 ├── app/
 │   ├── core/         settings, DB session, security (JWT/bcrypt), RBAC deps
 │   ├── models/       SQLAlchemy ORM (users, zones, areas, rate_cards, cod_rates,
-│   │                 orders, order_tracking, agent_profiles, notifications)
+│   │                 orders, order_tracking, agent_profiles, notifications, reschedules)
 │   ├── schemas/      pydantic request/response models
 │   ├── services/     business logic: auth, zone, rate_engine, pricing, order,
-│   │                 tracking, state_machine, assignment, notification
+│   │                 tracking, state_machine, assignment, notification (+ providers/
+│   │                 email & SMS integrations: mock / Resend / Twilio)
 │   └── routers/      thin HTTP layers delegating to services
 ├── alembic/          migrations (schema + DB-level trigger live here)
 ├── scripts/seed.py   idempotent demo/reference data
@@ -127,6 +165,18 @@ Backend reads `.env` (see `backend/.env.example`):
 | `SECRET_KEY` | auto-generated (dev only) | must be set when `ENVIRONMENT=production` |
 | `ENVIRONMENT` | `development` | |
 | `CORS_ORIGINS` | `http://localhost:3000` | comma-separated |
-| `NOTIFICATIONS_MODE` | `mock` | `disabled` turns off in-app rows and mock transports |
+| `NOTIFICATIONS_MODE` | `mock` | `disabled` turns off in-app rows and outbound channels |
+| `EMAIL_PROVIDER` | `mock` | `resend` sends real email (needs `EMAIL_API_KEY` + `EMAIL_FROM`) |
+| `SMS_PROVIDER` | `mock` | `twilio` sends real SMS (`SMS_API_KEY` = `AccountSid:AuthToken`, plus `SMS_FROM`) |
 
 Frontend reads `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`) — note it is baked into the client bundle at **build time** (pass as a Docker build arg).
+
+## Deployment
+
+- **Docker Compose (local):** `docker compose up -d --build` at the repo root — Postgres 18, API
+  (migrates on boot), frontend. Seed with `docker compose exec backend python scripts/seed.py`.
+- **Hosted:** a Render Blueprint provisions the managed database + API with automatic Alembic
+  migrations; the frontend deploys to Vercel. Step-by-step: [docs/deployment.md](docs/deployment.md).
+  Hosted `postgres://` URLs are normalized to `postgresql+psycopg://...?sslmode=require`
+  automatically.
+- Architecture notes: [docs/system-design.md](docs/system-design.md).

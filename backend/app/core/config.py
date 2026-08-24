@@ -23,6 +23,26 @@ class Settings(BaseSettings):
     secret_key: str = ""
     access_token_expire_minutes: int = 60 * 24
     notifications_mode: str = "mock"  # "mock" writes in-app rows and logs email/SMS; "disabled" turns off
+    # Outbound channel providers (used only when notifications are enabled).
+    email_provider: str = "mock"  # "mock" | "resend"
+    email_api_key: str = ""
+    email_from: str = ""
+    sms_provider: str = "mock"  # "mock" | "twilio"
+    sms_api_key: str = ""  # twilio format: "AccountSid:AuthToken"
+    sms_from: str = ""
+
+    @model_validator(mode="after")
+    def _normalize_database_url(self) -> "Settings":
+        # Hosted providers (e.g. Render) hand out postgres:// or postgresql:// URLs;
+        # SQLAlchemy needs the psycopg driver spelled out.
+        if self.database_url.startswith(("postgres://", "postgresql://")):
+            self.database_url = self.database_url.replace("postgres://", "postgresql+psycopg://", 1).replace(
+                "postgresql://", "postgresql+psycopg://", 1
+            )
+            if "sslmode=" not in self.database_url:
+                separator = "&" if "?" in self.database_url else "?"
+                self.database_url += f"{separator}sslmode=require"
+        return self
 
     @model_validator(mode="after")
     def _ensure_secret_key(self) -> "Settings":

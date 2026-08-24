@@ -1,9 +1,9 @@
 from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Area, Order, OrderStatus, User, UserRole
+from app.models import Area, Order, OrderStatus, Reschedule, User, UserRole
 from app.models.enums import OrderType, PaymentType
 from app.services import assignment_service, notification_service, tracking_service
 from app.services.rate_engine import calculate_quote
@@ -96,12 +96,26 @@ def get_order(db: Session, order_id) -> Order | None:
     return db.get(Order, order_id)
 
 
-def list_orders(db: Session, *, customer_id=None, status: OrderStatus | None = None, limit: int = 50, offset: int = 0) -> list[Order]:
+def list_orders(
+    db: Session,
+    *,
+    customer_id=None,
+    status: OrderStatus | None = None,
+    zone_id=None,
+    agent_id=None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Order]:
     query = select(Order).order_by(Order.created_at.desc()).limit(limit).offset(offset)
     if customer_id is not None:
         query = query.where(Order.customer_id == customer_id)
     if status is not None:
         query = query.where(Order.status == status)
+    if zone_id is not None:
+        # Zone matches either leg of the shipment.
+        query = query.where(or_(Order.pickup_zone_id == zone_id, Order.drop_zone_id == zone_id))
+    if agent_id is not None:
+        query = query.where(Order.assigned_agent_id == agent_id)
     return list(db.scalars(query))
 
 
@@ -154,26 +168,50 @@ def reschedule_order(
     *,
     order: Order,
     actor_id,
+    actor_role: str,
     scheduled_delivery_date: date | None = None,
     remarks: str | None = None,
 ) -> Order:
     """Send a FAILED order back to the assignment queue (FAILED -> PENDING).
 
-    Releases the assigned agent, clears the assignment, bumps the redelivery
-    date (default: tomorrow) and appends the tracking row — one transaction.
+    Releases the assigned agent, clears the assignment, records an audit row in
+    ``reschedules``, bumps the redelivery date (default: tomorrow), appends the
+    immutable tracking row and notifies the customer — one transaction.
+
+    ``actor_role`` distinguishes CUSTOMER-initiated redeliveries (which schedule a
+    new delivery attempt, incrementing ``delivery_attempt``) from admin overrides.
     """
     if order.status != OrderStatus.FAILED:
         raise OrderNotReschedulableError(f"Only FAILED orders can be rescheduled; order is {order.status.value}")
 
+    new_date = scheduled_delivery_date or _default_delivery_date()
+    previous_date = order.scheduled_delivery_date
     order.status = OrderStatus.PENDING
+    assignment_service.release_agent_if_idle(db, order)
     order.assigned_agent_id = None
-    order.scheduled_delivery_date = scheduled_delivery_date or _default_delivery_date()
+    order.scheduled_delivery_date = new_date
+    if actor_role == UserRole.CUSTOMER.value:
+        # A customer-scheduled retry opens a fresh delivery attempt.
+        order.delivery_attempt += 1
+    db.add(
+        Reschedule(
+            order_id=order.id,
+            requested_by=actor_id,
+            requested_by_role=actor_role,
+            previous_scheduled_date=previous_date,
+            new_scheduled_date=new_date,
+            remarks=(remarks or None),
+        )
+    )
     tracking_service.add_tracking_record(
         db,
         order_id=order.id,
         status=OrderStatus.PENDING,
         actor_id=actor_id,
-        remarks=(remarks or "Rescheduled for redelivery").strip(),
+        remarks=(
+            remarks
+            or f"Rescheduled for redelivery on {new_date.isoformat()} by {actor_role.lower()}"
+        ).strip(),
     )
     notification_service.notify_order_status(db, order=order, new_status=OrderStatus.PENDING, remarks=remarks)
     db.commit()
